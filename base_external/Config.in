@@ -1,0 +1,7 @@
+# base_external_br2_tree/Config.in
+menu "External packages (project_base)"
+
+source "$BR2_EXTERNAL_PROJECT_BASE_PATH/package/aesd-assignments/Config.in"
+
+endmenu
+
