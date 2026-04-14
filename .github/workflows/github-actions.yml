@@ -20,7 +20,23 @@ jobs:
           - name: Run full test
             env:
               GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
-            run: ./full-test.sh
+            run: |
+              set -euo pipefail
+              timeout 50m ./full-test.sh || {
+                rc=$?
+                echo "full-test.sh exited with ${rc}"
+                echo "===== diagnostics: socket listeners ====="
+                ss -ltnp || true
+                echo "===== diagnostics: qemu/ssh processes ====="
+                ps -ef | grep -E "qemu-system-aarch64|dropbear|sshpass|ssh " | grep -v grep || true
+                echo "===== diagnostics: localhost:10022 probe ====="
+                (timeout 3 bash -c 'cat < /dev/tcp/127.0.0.1/10022' >/tmp/port10022.banner 2>/tmp/port10022.err && echo "banner read succeeded") || true
+                cat /tmp/port10022.err || true
+                cat /tmp/port10022.banner || true
+                echo "===== diagnostics: tail test log ====="
+                if [ -f test.sh.log ]; then tail -n 120 test.sh.log; fi
+                exit ${rc}
+              }
           - name: Cleanup
             if: always()
             run: |
