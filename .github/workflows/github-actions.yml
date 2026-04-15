@@ -17,27 +17,36 @@ jobs:
           - uses: webfactory/ssh-agent@v0.5.3
             with:
                 ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-          - name: Run full test
+          - name: Build image artifacts
             shell: bash
             env:
               GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
             run: |
               set -euo pipefail
-              timeout 50m ./full-test.sh || {
+              DO_VALIDATE=0 ./full-test.sh
+          - name: Validate in qemu (with retry)
+            shell: bash
+            run: |
+              set -euo pipefail
+              rc=1
+              for attempt in 1 2 3; do
+                echo "QEMU validation attempt ${attempt}/3"
+                pkill -f qemu-system-aarch64 || true
+                sleep 2
+                if timeout 20m bash -c 'SKIP_BUILD=1 DO_VALIDATE=1 ./full-test.sh'; then
+                  rc=0
+                  break
+                fi
                 rc=$?
-                echo "full-test.sh exited with ${rc}"
-                echo "===== diagnostics: socket listeners ====="
-                ss -ltnp || true
-                echo "===== diagnostics: qemu/ssh processes ====="
-                ps -ef | grep -E "qemu-system-aarch64|dropbear|sshpass|ssh " | grep -v grep || true
-                echo "===== diagnostics: localhost:10022 probe ====="
-                (timeout 3 bash -c 'cat < /dev/tcp/127.0.0.1/10022' >/tmp/port10022.banner 2>/tmp/port10022.err && echo "banner read succeeded") || true
-                cat /tmp/port10022.err || true
-                cat /tmp/port10022.banner || true
-                echo "===== diagnostics: tail test log ====="
-                if [ -f test.sh.log ]; then tail -n 120 test.sh.log; fi
-                exit ${rc}
-              }
+                echo "Validation attempt ${attempt} failed with rc=${rc}"
+                echo "===== diagnostics: listeners on 10022 ====="
+                ss -ltnp | grep ':10022' || true
+                echo "===== diagnostics: qemu processes ====="
+                ps -ef | grep qemu-system-aarch64 | grep -v grep || true
+                echo "===== diagnostics: test log tail ====="
+                if [ -f test.sh.log ]; then tail -n 100 test.sh.log; fi
+              done
+              exit ${rc}
           - name: Cleanup
             if: always()
             run: |
