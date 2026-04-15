@@ -7,47 +7,23 @@ on:
             - '*'
 jobs:
     full-test:
-        container: cuaesd/aesd-autotest:24-assignment4-buildroot
         runs-on: self-hosted
         timeout-minutes: 120
         steps:
           - uses: actions/checkout@v2
           - name: Checkout submodules
             run: git submodule update --init --recursive
-          - uses: webfactory/ssh-agent@v0.5.3
-            with:
-                ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-          - name: Build image artifacts
+          - name: Run full test in autotest container
             shell: bash
             env:
+              SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
               GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
             run: |
               set -euo pipefail
-              DO_VALIDATE=0 ./full-test.sh
-          - name: Validate in qemu (with retry)
-            shell: bash
-            run: |
-              set -euo pipefail
-              rc=1
-              for attempt in 1 2 3; do
-                echo "QEMU validation attempt ${attempt}/3"
-                pkill -f qemu-system-aarch64 || true
-                sleep 2
-                if timeout 20m bash -c 'SKIP_BUILD=1 DO_VALIDATE=1 ./full-test.sh'; then
-                  rc=0
-                  break
-                fi
-                rc=$?
-                echo "Validation attempt ${attempt} failed with rc=${rc}"
-                echo "===== diagnostics: listeners on 10022 ====="
-                ss -ltnp | grep ':10022' || true
-                echo "===== diagnostics: qemu processes ====="
-                ps -ef | grep qemu-system-aarch64 | grep -v grep || true
-                echo "===== diagnostics: test log tail ====="
-                if [ -f test.sh.log ]; then tail -n 100 test.sh.log; fi
-              done
-              exit ${rc}
-          - name: Cleanup
-            if: always()
-            run: |
-              ssh-add -D
+              docker run --rm \
+                -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" \
+                -w "${GITHUB_WORKSPACE}" \
+                -e SSH_PRIVATE_KEY \
+                -e GIT_SSH_COMMAND \
+                cuaesd/aesd-autotest:24-assignment4-buildroot \
+                ./full-test.sh
